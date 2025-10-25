@@ -1,11 +1,13 @@
 --[[
     Roblox Local Script - Menu Drag com Funções
     Criado por Manus
-    
-    Instruções de Uso:
-    Este é um LocalScript. Ele deve ser injetado no jogo usando um executor (exploit)
-    ou colocado em StarterPlayerScripts se você for o desenvolvedor do jogo.
-    O ESP utiliza a API 'Drawing', comum em executores.
+
+    Corrigido por: assistant
+    Problemas corrigidos:
+    - Variáveis globais/locais não declaradas (isMinimized, isSpeedEnabled).
+    - Trecho de comentário mesclado com código que fazia definição de função ficar comentada.
+    - Falta de quebras de linha entre instruções (causava erro de sintaxe).
+    - Pequenas melhorias de segurança (checagens de existência antes de acessar humanoid).
 --]]
 
 local Players = game:GetService("Players")
@@ -24,6 +26,9 @@ local currentJumpValue = 50 -- JumpPower padrão do Roblox é 50
 local isAutoClickerEnabled = false
 local autoClickerConnection = nil
 local currentCPS = 10 -- CPS padrão
+
+local isSpeedEnabled = false
+local isMinimized = false
 
 -- Configurações do Menu
 local menuWidth = 300
@@ -98,7 +103,6 @@ MinimizedBall.Text = "M"
 MinimizedBall.TextColor3 = Color3.fromRGB(255, 255, 255)
 MinimizedBall.Font = Enum.Font.SourceSansBold
 MinimizedBall.TextSize = 30
--- MinimizedBall.CornerRadius = UDim.new(1, 0) -- REMOVIDO: CornerRadius não é membro direto de TextButton
 
 local Corner = Instance.new("UICorner")
 Corner.CornerRadius = UDim.new(1, 0) -- Transforma em bolinha
@@ -112,19 +116,8 @@ MinimizedBall.Parent = ScreenGui
 -- 2. Funcionalidade de Drag (Arrastar)
 -- ====================================================================================================
 
-local dragStart = Vector2.new(0, 0)
-local startPos = UDim2.new(0, 0, 0, 0)
-
--- Função para arrastar o menu principal
--- As funções startDrag e endDrag foram movidas para a seção de conexão para melhor controle de escopo e desconexão.
--- Apenas o drag da bolinha precisa ser corrigido.
-
-
-local dragConnection
-
--- Drag do MainFrame agora é nativo (MainFr-- Drag do MainFrame agora é nativo (MainFrame.Draggable = true)
+-- Drag do MainFrame agora é nativo (MainFrame.Draggable = true)
 TitleBar.InputBegan:Connect(function(input)
-    -- Apenas para garantir que o drag nativo seja ativado na TitleBar
     if input.UserInputType == Enum.UserInputType.MouseButton1 and not isMinimized then
         MainFrame.Draggable = true
     end
@@ -132,7 +125,6 @@ end)
 
 -- Drag do MinimizedBall agora é nativo (MinimizedBall.Draggable = true)
 MinimizedBall.InputBegan:Connect(function(input)
-    -- Apenas para garantir que o drag nativo seja ativado
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         MinimizedBall.Draggable = true
     end
@@ -148,8 +140,9 @@ local function minimizeMenu()
     MinimizedBall.Visible = true
     -- Salva a posição do MainFrame para restaurar
     MinimizedBall:SetAttribute("LastPosition", MainFrame.Position)
-    -- Move a bolinha para a posição do botão de minimizar (opcional, mas visualmente agradável)
+    -- Move a bolinha para a posição do botão de minimizar (opcional)
     local absPos = MainFrame.AbsolutePosition + Vector2.new(MainFrame.AbsoluteSize.X - minimizedSize, 0)
+    -- Converte posição absoluta em UDim2 (usando offsets)
     MinimizedBall.Position = UDim2.new(0, absPos.X, 0, absPos.Y)
 end
 
@@ -169,11 +162,15 @@ MinimizedBall.MouseButton1Click:Connect(maximizeMenu)
 
 -- ====================================================================================================
 -- 4. Funções e Controles do Menu
--- ================================================================================================local function createToggle(parent, text, callback)
+-- ====================================================================================================
+
+local function createToggle(parent, text, callback)
     local ToggleFrame = Instance.new("Frame")
     ToggleFrame.Size = UDim2.new(1, -20, 0, 30)
     ToggleFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    ToggleFrame.Parent = parent   local Label = Instance.new("TextLabel")
+    ToggleFrame.Parent = parent
+
+    local Label = Instance.new("TextLabel")
     Label.Size = UDim2.new(1, -40, 1, 0)
     Label.Position = UDim2.new(0, 0, 0, 0)
     Label.BackgroundTransparency = 1
@@ -208,7 +205,7 @@ MinimizedBall.MouseButton1Click:Connect(maximizeMenu)
         end
         callback(isToggled)
     end)
-    
+
     return Button, ToggleFrame
 end
 
@@ -362,19 +359,24 @@ end
 
 local function onAutoClickerToggle(isToggled)
     isAutoClickerEnabled = isToggled
-    
+
     if isToggled then
         if not autoClickerConnection then
             autoClickerConnection = coroutine.create(function()
                 while isAutoClickerEnabled do
-                    local delay = 1 / currentCPS
-                    pcall(function() 
+                    local delayTime = 1 / currentCPS
+                    pcall(function()
                         -- Simula o clique do mouse. Usamos VirtualInputManager que é comum em exploits
-                        game:GetService("VirtualInputManager"):SendMouseButtonEvent(0, 0, 0, true, game, 1) 
-                        task.wait(0.01) -- Pequeno delay entre down e up
-                        game:GetService("VirtualInputManager"):SendMouseButtonEvent(0, 0, 0, false, game, 1) 
+                        local success, vim = pcall(function()
+                            return game:GetService("VirtualInputManager")
+                        end)
+                        if success and vim and vim.SendMouseButtonEvent then
+                            vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                            task.wait(0.01)
+                            vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                        end
                     end)
-                    task.wait(delay)
+                    task.wait(delayTime)
                 end
             end)
             coroutine.resume(autoClickerConnection)
@@ -400,8 +402,12 @@ local espConnections = {}
 
 local function cleanupESP()
     for _, draw in pairs(espDrawings) do
-        if draw.box then draw.box:Remove() end
-        if draw.line then draw.line:Remove() end
+        if draw.box then
+            pcall(function() draw.box:Remove() end)
+        end
+        if draw.line then
+            pcall(function() draw.line:Remove() end)
+        end
     end
     espDrawings = {}
 end
@@ -425,14 +431,13 @@ local function updateESP()
     local idx = 1
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChildOfClass("Humanoid") and player.Character:FindFirstChildOfClass("Humanoid").Health > 0 and not isSameTeam(LocalPlayer, player) then
-            
-            local rootPart = player.Character.HumanoidRootPart
+
+            local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
             local head = player.Character:FindFirstChild("Head")
-            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
 
             if rootPart and head and humanoid then
                 -- O ESP de baixo nível (Drawing) é mais robusto
-                
                 if not espDrawings[idx] then
                     espDrawings[idx] = {
                         box = Drawing.new("Square"),
@@ -444,7 +449,7 @@ local function updateESP()
                     espDrawings[idx].line.Color = Color3.fromRGB(255, 0, 0) -- Linha vermelha
                     espDrawings[idx].box.Color = Color3.fromRGB(255, 0, 0) -- Caixa vermelha
                 end
-                
+
                 local draw = espDrawings[idx]
 
                 -- Ponto do pé (aproximado) e ponto da cabeça
@@ -463,10 +468,10 @@ local function updateESP()
                     draw.box.Visible = true
 
                     -- Snapline (linha do centro da tela para o jogador)
-                    draw.line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y) -- Base da tela
+                    draw.line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                     draw.line.To = Vector2.new(rootPoint.X, rootPoint.Y)
                     draw.line.Visible = true
-                    
+
                     idx = idx + 1
                 else
                     draw.box.Visible = false
@@ -475,11 +480,11 @@ local function updateESP()
             end
         end
     end
-    
+
     -- Esconde desenhos de jogadores que saíram
-    for i=idx, #espDrawings do
-        if espDrawings[i].box then espDrawings[i].box.Visible = false end
-        if espDrawings[i].line then espDrawings[i].line.Visible = false end
+    for i = idx, #espDrawings do
+        if espDrawings[i] and espDrawings[i].box then espDrawings[i].box.Visible = false end
+        if espDrawings[i] and espDrawings[i].line then espDrawings[i].line.Visible = false end
     end
 end
 
@@ -487,7 +492,9 @@ local function onESPToggle(isToggled)
     isESPEnabled = isToggled
     if isToggled then
         -- Conecta a função de atualização ao RenderStepped para rodar a cada frame
-        espConnections.RenderStepped = RunService.RenderStepped:Connect(updateESP)
+        if not espConnections.RenderStepped then
+            espConnections.RenderStepped = RunService.RenderStepped:Connect(updateESP)
+        end
     else
         -- Desconecta e remove todas as caixas
         if espConnections.RenderStepped then
@@ -501,13 +508,12 @@ end
 -- Cria o controle de ESP
 local espToggle, espFrame = createToggle(ContentFrame, "Ativar ESP (Box Vermelha)", onESPToggle)
 
+
 -- ====================================================================================================
 -- 5. Limpeza e Finalização
 -- ====================================================================================================
 
 -- Garante que o menu seja destruído quando o jogador sair (importante para scripts injetados)
--- O GameProcessedEvent não é um Service válido em todos os contextos.
--- Usaremos o CharacterRemoving como alternativa para limpeza.
 LocalPlayer.CharacterRemoving:Connect(function()
     if ScreenGui.Parent == CoreGui then
         ScreenGui:Destroy()
